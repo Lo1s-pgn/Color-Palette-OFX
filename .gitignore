@@ -1,0 +1,43 @@
+# Build outputs
+build/
+plugin/version_gen.h
+*.o
+*.ofx
+*.bundle/
+
+# Local release outputs — LSP_Color_Palette_<version>_<platform>/
+release/
+
+# Local maintainer scripts (not in repo)
+scripts/
+tools/make_release.sh
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+venv/
+.venv/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Xcode / macOS
+xcode-build/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Windows
+*.vcxproj.user
+*.suo
+*.sdf
+
+# OS
+.DS_Store
+Thumbs.db
