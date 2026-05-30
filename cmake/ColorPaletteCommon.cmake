@@ -10,10 +10,15 @@ set(PALETTE_PLUGIN_CORE_SRCS
   "${CMAKE_SOURCE_DIR}/common/color/ColorManagement.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteUtil.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteImageAccess.cpp"
-  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteGridBlur.cpp"
+  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteAnalysis.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteExtract.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteComposite.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteDescribe.cpp"
+  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteGpuParams.cpp"
+  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteRender.cpp"
+  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteRenderCache.cpp"
+  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteRuntimeEnv.cpp"
+  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteRenderProcessor.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteProcessor.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPalettePlugin.cpp"
 )
@@ -32,6 +37,9 @@ set(PALETTE_OFX_SUPPORT_SRCS
 set(PALETTE_INCLUDE_DIRS
   "${CMAKE_SOURCE_DIR}/plugin"
   "${CMAKE_SOURCE_DIR}/plugin/core"
+  "${CMAKE_SOURCE_DIR}/plugin/metal"
+  "${CMAKE_SOURCE_DIR}/plugin/cuda"
+  "${CMAKE_SOURCE_DIR}/plugin/opencl"
   "${CMAKE_SOURCE_DIR}/common/color"
   "${OFX_SDK_PATH}/include"
   "${OFX_SDK_PATH}/Support/include"
@@ -49,7 +57,7 @@ add_library(colorpalette_ofx MODULE
 target_include_directories(colorpalette_ofx PRIVATE ${PALETTE_INCLUDE_DIRS} ${PALETTE_PLATFORM_INCLUDE_DIRS})
 target_compile_features(colorpalette_ofx PRIVATE cxx_std_20)
 target_compile_options(colorpalette_ofx PRIVATE ${PALETTE_COMPILE_OPTIONS})
-target_compile_definitions(colorpalette_ofx PRIVATE ${PALETTE_COMPILE_DEFINITIONS})
+target_compile_definitions(colorpalette_ofx PRIVATE ${PALETTE_COMPILE_DEFINITIONS} OFX_SUPPORTS_OPENCLRENDER)
 if(PALETTE_LINK_LIBS)
   target_link_libraries(colorpalette_ofx PRIVATE ${PALETTE_LINK_LIBS})
 endif()

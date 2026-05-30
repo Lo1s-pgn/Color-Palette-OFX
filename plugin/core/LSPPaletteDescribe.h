@@ -5,4 +5,6 @@
 
 void describePaletteInContext(OFX::ImageEffectDescriptor& p_Desc, OFX::ContextEnum p_Context);
 
+void applyPaletteHostRenderSupport(OFX::ImageEffectDescriptor& d, bool advertiseHostCuda, bool advertiseHostMetal);
+
 #endif

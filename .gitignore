@@ -1,9 +1,15 @@
 # Build outputs
 build/
+build-*/
+build-macos/
+xcode-build/
+
 plugin/version_gen.h
 *.o
 *.ofx
 *.bundle/
+*.air
+*.metallib
 
 # Local release outputs — LSP_Color_Palette_<version>_<platform>/
 release/
@@ -27,11 +33,11 @@ venv/
 *~
 
 # Xcode / macOS
-xcode-build/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 DerivedData/
 *.xcuserstate
+.DS_Store
 
 # Windows
 *.vcxproj.user
@@ -39,5 +45,4 @@ DerivedData/
 *.sdf
 
 # OS
-.DS_Store
 Thumbs.db

@@ -38,6 +38,10 @@ cmake --build build/linux --target colorpalette_all
 
 Install the `.ofx.bundle` from your platform's release folder — see root README **Installation**.
 
+## GPU QA
+
+[palette_gpu_parity.md](palette_gpu_parity.md) — manual checklist for CPU vs GPU extract/composite parity, env vars, backend fallbacks, and playback cache behavior (`extract_cache_fast`, `metal_mmcq`, etc.).
+
 ## GitHub remote
 
 This project tracks **`https://github.com/Lo1s-pgn/Color-Palette-OFX`**. If `.git` was lost or the folder was copied without history, run from the repo root:

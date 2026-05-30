@@ -1,4 +1,4 @@
-// OFX plug-in instance: dominant-color palette overlay (CPU extract and composite).
+// OFX plug-in instance: dominant-color palette overlay (CPU extract, GPU/CPU composite).
 #include "LSPPalettePlugin.h"
 #include "LSPPaletteDescribe.h"
 #include "LSPPaletteConstants.h"
@@ -7,8 +7,18 @@
 #include "LSPPaletteExtract.h"
 #include "LSPPaletteComposite.h"
 #include "LSPPaletteProcessor.h"
+#include "LSPPaletteRenderCache.h"
+#include "LSPPaletteRender.h"
+#include "LSPPaletteGpuParams.h"
+#include "LSPPaletteRuntimeEnv.h"
+#include "LSPPaletteAnalysis.h"
+#include "LSPPaletteImageAccess.h"
 #include "ColorManagement.h"
 #include "ofxsCore.h"
+
+#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#include "LSPPaletteMetalStage.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -65,6 +75,14 @@ double clampDouble(OFX::DoubleParam* p, double t, double lo, double hi, double d
     return std::clamp(v, lo, hi);
 }
 
+bool isPaletteParam(const std::string& paramName) {
+    return paramLeafIs(paramName, "paletteInputPrimaries") || paramLeafIs(paramName, "paletteInputTransfer")
+        || paramLeafIs(paramName, "palettePatchCount") || paramLeafIs(paramName, "paletteSortOrder")
+        || paramLeafIs(paramName, "paletteLayout") || paramLeafIs(paramName, "paletteFullFrame")
+        || paramLeafIs(paramName, "palettePatchSize") || paramLeafIs(paramName, "paletteGap")
+        || paramLeafIs(paramName, "paletteCorner") || paramLeafIs(paramName, "paletteBackgroundLightness");
+}
+
 } // namespace
 
 class LSPPalettePlugin : public OFX::ImageEffect {
@@ -91,6 +109,9 @@ private:
     OFX::DoubleParam* paletteCorner_ = nullptr;
     OFX::DoubleParam* paletteBackgroundLightness_ = nullptr;
 
+    LSPPaletteRenderCache renderCache_;
+    LSPPaletteRenderProcessor renderProcessor_;
+    std::vector<float> analysisStaging_;
 };
 
 LSPPalettePlugin::LSPPalettePlugin(OfxImageEffectHandle handle)
@@ -135,6 +156,8 @@ LSPPalettePlugin::~LSPPalettePlugin() = default;
 
 void LSPPalettePlugin::changedParam(const OFX::InstanceChangedArgs& args, const std::string& paramName) {
     (void)args;
+    if (isPaletteParam(paramName))
+        renderCache_.invalidateAll();
     if (paramLeafIs(paramName, "supportWebsite")) {
         lspPaletteOpenUrl(kPaletteRepoUrl);
         return;
@@ -152,10 +175,15 @@ void LSPPalettePlugin::changedParam(const OFX::InstanceChangedArgs& args, const 
 void LSPPalettePlugin::changedClip(const OFX::InstanceChangedArgs& args, const std::string& clipName) {
     (void)args;
     (void)clipName;
+    renderCache_.invalidateAll();
 }
 
 void LSPPalettePlugin::render(const OFX::RenderArguments& args) {
-    LSP_PALETTE_TRACE(std::string("trace: render enter t=") + std::to_string(args.time));
+    LSPPaletteRuntimeEnv::logStageLine(std::string("trace: render enter t=") + std::to_string(args.time));
+    if (args.isEnabledMetalRender)
+        LSPPaletteRuntimeEnv::logStage("render: OFX Metal buffers");
+    else if (args.isEnabledCudaRender)
+        LSPPaletteRuntimeEnv::logStage("render: OFX CUDA buffers");
     std::unique_ptr<OFX::Image> dst(dstClip_->fetchImage(args.time));
     std::unique_ptr<OFX::Image> src(srcClip_->fetchImage(args.time));
     if (!dst.get() || !src.get() || !dst->getPixelData() || !src->getPixelData())
@@ -167,6 +195,10 @@ void LSPPalettePlugin::render(const OFX::RenderArguments& args) {
 
     const OfxRectI db = dst->getBounds();
     const OfxRectI sb = src->getBounds();
+    const int width = db.x2 - db.x1;
+    const int height = db.y2 - db.y1;
+    if (width <= 0 || height <= 0)
+        return;
 
     const int primIdx = clampChoice(paletteInputPrimaries_, args.time,
         WorkshopColor::inputPrimariesChoiceIndex(WorkshopColor::ColorPrimariesId::Rec709));
@@ -174,9 +206,7 @@ void LSPPalettePlugin::render(const OFX::RenderArguments& args) {
         WorkshopColor::inputTransferFunctionChoiceIndex(WorkshopColor::TransferFunctionId::Gamma24));
 
     const int patchCount = clampInt(palettePatchCount_, args.time, 3, 24, 8);
-
     const int sortOrder = clampChoice(paletteSortOrder_, args.time, 0);
-
     const int layout = clampChoice(paletteLayout_, args.time, LSPPaletteComposite::kLayoutBottom);
 
     bool fullFrame = false;
@@ -193,15 +223,136 @@ void LSPPalettePlugin::render(const OFX::RenderArguments& args) {
     es.transfer = WorkshopColor::inputTransferFunctionIdFromChoiceIndex(tfIdx);
     es.patchCount = patchCount;
     es.sortOrder = sortOrder;
-    es.detailSuppression = 0.5f;
+
+    LSPPaletteRenderCache::ExtractKey eKey;
+    eKey.time = args.time;
+    eKey.patchCount = patchCount;
+    eKey.sortOrder = sortOrder;
+    eKey.primaries = es.primaries;
+    eKey.transfer = es.transfer;
+    eKey.srcW = sb.x2 - sb.x1;
+    eKey.srcH = sb.y2 - sb.y1;
+    eKey.sourceFingerprint = 0;
 
     std::vector<LSPPaletteExtract::Swatch> palette;
-    LSP_PALETTE_TRACE("trace: extract begin");
-    if (!LSPPaletteExtract::extractDominantColors(src.get(), sb, es, palette) || palette.empty()) {
-        palette.clear();
-        LSP_PALETTE_LOG_ERROR("palette_extract_failed");
+    bool havePalette = false;
+
+    if (renderCache_.hasCachedPaletteForParams(eKey)) {
+        uint64_t quickFp = 0;
+        bool quickFpOk = false;
+#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+        if (args.isEnabledMetalRender && args.pMetalCmdQ != nullptr) {
+            const int srcRb = src->getRowBytes();
+            const size_t srcRowBytes = srcRb < 0 ? static_cast<size_t>(-srcRb) : static_cast<size_t>(srcRb);
+            quickFpOk = LSPPaletteMetalStage::computeHostMetalFingerprint(
+                src->getPixelData(), args.pMetalCmdQ, sb, srcRowBytes, quickFp);
+        }
+#endif
+        if (!quickFpOk && !args.isEnabledMetalRender && !args.isEnabledCudaRender) {
+            const float* slab = LSPPaletteImageAccess::cpuReadableSlab(src.get());
+            if (slab) {
+                int fpW = 0;
+                int fpH = 0;
+                if (LSPPaletteAnalysis::downscaleRgbaSlab(slab,
+                        src->getRowBytes(),
+                        sb,
+                        LSPPaletteAnalysis::kFingerprintGrid,
+                        analysisStaging_,
+                        fpW,
+                        fpH)) {
+                    const OfxRectI fpBounds = LSPPaletteAnalysis::makeTightBounds(fpW, fpH);
+                    quickFp = LSPPaletteRenderCache::computeSourceFingerprintFromSlab(
+                        analysisStaging_.data(), fpW * 4 * static_cast<int>(sizeof(float)), fpBounds);
+                    quickFpOk = quickFp != 0;
+                }
+            }
+        }
+        if (quickFpOk) {
+            eKey.sourceFingerprint = quickFp;
+            havePalette = renderCache_.tryGetCachedExtract(eKey, palette);
+            if (havePalette)
+                LSPPaletteRuntimeEnv::logStage("extract_cache_fast");
+        }
     }
-    LSP_PALETTE_TRACE(std::string("trace: extract done n=") + std::to_string(palette.size()));
+
+    if (!havePalette) {
+        const float* extractSlab = nullptr;
+        int extractRowBytes = 0;
+        OfxRectI extractBounds = sb;
+
+#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+        if (args.isEnabledMetalRender && args.pMetalCmdQ != nullptr) {
+            const int srcRb = src->getRowBytes();
+            const size_t srcRowBytes = srcRb < 0 ? static_cast<size_t>(-srcRb) : static_cast<size_t>(srcRb);
+            int analysisW = 0;
+            int analysisH = 0;
+            if (LSPPaletteMetalStage::stageHostMetalForExtract(src->getPixelData(),
+                    args.pMetalCmdQ,
+                    sb,
+                    srcRowBytes,
+                    LSPPaletteAnalysis::kMaxExtractSide,
+                    analysisStaging_,
+                    analysisW,
+                    analysisH)) {
+                extractSlab = analysisStaging_.data();
+                extractBounds = LSPPaletteAnalysis::makeTightBounds(analysisW, analysisH);
+                extractRowBytes = analysisW * 4 * static_cast<int>(sizeof(float));
+            } else {
+                LSP_PALETTE_LOG_ERROR("metal_stage_extract_failed");
+            }
+        }
+#endif
+        if (extractSlab != nullptr)
+            eKey.sourceFingerprint = LSPPaletteRenderCache::computeSourceFingerprintFromSlab(
+                extractSlab, extractRowBytes, extractBounds);
+        else if (!args.isEnabledMetalRender && !args.isEnabledCudaRender) {
+            const float* slab = LSPPaletteImageAccess::cpuReadableSlab(src.get());
+            if (slab) {
+                int analysisW = 0;
+                int analysisH = 0;
+                if (LSPPaletteAnalysis::downscaleRgbaSlab(slab,
+                        src->getRowBytes(),
+                        sb,
+                        LSPPaletteAnalysis::kMaxExtractSide,
+                        analysisStaging_,
+                        analysisW,
+                        analysisH)) {
+                    extractSlab = analysisStaging_.data();
+                    extractBounds = LSPPaletteAnalysis::makeTightBounds(analysisW, analysisH);
+                    extractRowBytes = analysisW * 4 * static_cast<int>(sizeof(float));
+                    eKey.sourceFingerprint = LSPPaletteRenderCache::computeSourceFingerprintFromSlab(
+                        extractSlab, extractRowBytes, extractBounds);
+                } else {
+                    eKey.sourceFingerprint = LSPPaletteRenderCache::computeSourceFingerprint(src.get(), sb);
+                    extractSlab = slab;
+                    extractBounds = sb;
+                    extractRowBytes = src->getRowBytes();
+                }
+            }
+        }
+
+        if (!renderCache_.tryGetCachedExtract(eKey, palette)) {
+            renderCache_.bumpMiss();
+            LSPPaletteRuntimeEnv::logStage("trace: extract begin");
+            bool extracted = false;
+            if (extractSlab != nullptr && args.isEnabledMetalRender && args.pMetalCmdQ != nullptr)
+                extracted = LSPPaletteExtract::extractDominantColorsFromAnalysisSlabGpu(
+                    extractSlab, extractRowBytes, extractBounds, args.pMetalCmdQ, es, palette);
+            else if (extractSlab != nullptr)
+                extracted = LSPPaletteExtract::extractDominantColorsFromSlab(
+                    extractSlab, extractRowBytes, extractBounds, es, palette);
+            else if (!args.isEnabledMetalRender)
+                extracted = LSPPaletteExtract::extractDominantColors(src.get(), sb, es, palette);
+            if (extracted && args.isEnabledMetalRender)
+                LSPPaletteRuntimeEnv::logStage("extract_gpu_gather");
+            if (!extracted || palette.empty()) {
+                palette.clear();
+                LSP_PALETTE_LOG_ERROR("palette_extract_failed");
+            }
+            LSPPaletteRuntimeEnv::logStageLine(std::string("trace: extract done n=") + std::to_string(palette.size()));
+            renderCache_.storeExtract(eKey, palette);
+        }
+    }
 
     LSPPaletteComposite::Presentation pres;
     pres.layout = layout;
@@ -215,10 +366,78 @@ void LSPPalettePlugin::render(const OFX::RenderArguments& args) {
     WorkshopColor::TransferFunctionId tfId = WorkshopColor::inputTransferFunctionIdFromChoiceIndex(tfIdx);
     WorkshopColor::ColorPrimariesId primId = WorkshopColor::inputPrimariesIdFromChoiceIndex(primIdx);
 
+    LSPPaletteRenderCache::PresentationKey pKey;
+    pKey.layout = layout;
+    pKey.fitPaletteToFrame = fullFrame;
+    pKey.imageFillCoverCrop = fullFrame;
+    pKey.stripFrac = stripFrac;
+    pKey.gapFrac = gapR;
+    pKey.cornerFrac = cornerR;
+    pKey.bgLightness = bgLight;
+    pKey.dstW = width;
+    pKey.dstH = height;
+
     LSPPaletteComposite::OverlayLayout overlayLay;
     LSPPaletteComposite::CompositeFrame frameLay;
-    const bool havePlan = !palette.empty()
-        && LSPPaletteComposite::buildCompositePlan(db, sb, palette, tfId, primId, pres, overlayLay, frameLay);
+    bool havePlan = false;
+    if (!renderCache_.tryGetCachedPlan(pKey, overlayLay, frameLay, havePlan)) {
+        renderCache_.bumpMiss();
+        havePlan = !palette.empty()
+            && LSPPaletteComposite::buildCompositePlan(db, sb, palette, tfId, primId, pres, overlayLay, frameLay);
+        renderCache_.storePlan(pKey, overlayLay, frameLay, havePlan);
+    }
+
+    LSPPaletteRuntimeEnv::logCacheStats(renderCache_.cacheHits_, renderCache_.cacheMisses_);
+
+    LSPPaletteGpuParams gpuParams{};
+    if (havePlan) {
+        const int srcRb = src->getRowBytes();
+        const int dstRb = dst->getRowBytes();
+        const size_t srcRowBytes = srcRb < 0 ? static_cast<size_t>(-srcRb) : static_cast<size_t>(srcRb);
+        const size_t dstRowBytes = dstRb < 0 ? static_cast<size_t>(-dstRb) : static_cast<size_t>(dstRb);
+        LSPPaletteGpuParamsUtil::packFromLayout(db, sb, overlayLay, frameLay, width, height, srcRowBytes, dstRowBytes, gpuParams);
+        renderProcessor_.setGpuParams(gpuParams);
+
+#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+        if (args.isEnabledMetalRender && args.pMetalCmdQ != nullptr && LSPPaletteRuntimeEnv::preferHostMetal()) {
+            const void* srcMetal = src->getPixelData();
+            void* dstMetal = dst->getPixelData();
+            if (srcMetal != nullptr && dstMetal != nullptr
+                && renderProcessor_.renderMetalHostBuffers(
+                    srcMetal, dstMetal, width, height, srcRowBytes, dstRowBytes, args.pMetalCmdQ)) {
+                LSPPaletteRuntimeEnv::logGpuBackend("metal_host");
+                return;
+            }
+            LSPPaletteRuntimeEnv::logGpuBackend("metal_host_failed");
+
+            std::vector<float> srcCpu;
+            std::vector<float> dstCpu;
+            if (LSPPaletteMetalStage::copyHostMetalImageToCpu(srcMetal, args.pMetalCmdQ, db, srcRowBytes, srcCpu)) {
+                dstCpu = srcCpu;
+                const size_t packedRow = static_cast<size_t>(width) * 4u * sizeof(float);
+                if (renderProcessor_.renderWithLayout(
+                        srcCpu.data(), dstCpu.data(), width, height, packedRow, packedRow, false)
+                    && LSPPaletteMetalStage::copyCpuToHostMetalImage(
+                        dstMetal, args.pMetalCmdQ, db, dstRowBytes, dstCpu.data(), dstCpu.size())) {
+                    LSPPaletteRuntimeEnv::logGpuBackend("metal_staged");
+                    return;
+                }
+            }
+            LSPPaletteRuntimeEnv::logGpuBackend("metal_staged_failed");
+        }
+#endif
+#if defined(LSP_PALETTE_HAS_CUDA)
+        if (LSPPaletteRuntimeEnv::preferHostCuda() && args.isEnabledCudaRender && args.pCudaStream != nullptr) {
+            const float* srcDev = static_cast<const float*>(src->getPixelData());
+            float* dstDev = static_cast<float*>(dst->getPixelData());
+            if (srcDev != nullptr && dstDev != nullptr
+                && renderProcessor_.renderCUDAHostBuffers(srcDev, dstDev, width, height, srcRowBytes, dstRowBytes, args.pCudaStream)) {
+                LSPPaletteRuntimeEnv::logGpuBackend("cuda_host");
+                return;
+            }
+        }
+#endif
+    }
 
     LSPPaletteProcessor proc(*this);
     proc.setDstImg(dst.get());
@@ -227,9 +446,11 @@ void LSPPalettePlugin::render(const OFX::RenderArguments& args) {
     proc.setGPURenderArgs(args);
     proc.setDrawOverlay(!palette.empty());
     proc.setCompositorState(overlayLay, frameLay, havePlan);
-    LSP_PALETTE_TRACE("trace: proc.process begin");
+    proc.setGpuParams(gpuParams);
+    proc.setRenderProcessor(&renderProcessor_);
+    LSPPaletteRuntimeEnv::logStage("trace: proc.process begin");
     proc.process();
-    LSP_PALETTE_TRACE("trace: proc.process done");
+    LSPPaletteRuntimeEnv::logStage("trace: proc.process done");
 }
 
 LSPPalettePluginFactory::LSPPalettePluginFactory()
@@ -250,7 +471,13 @@ void LSPPalettePluginFactory::describe(OFX::ImageEffectDescriptor& desc) {
     desc.setTemporalClipAccess(false);
     desc.setRenderTwiceAlways(false);
     desc.setSupportsMultipleClipPARs(kSupportsMultipleClipPARs);
-    desc.setSupportsMetalRender(false);
+#if defined(__APPLE__)
+    applyPaletteHostRenderSupport(desc, false, true);
+#elif defined(OFX_SUPPORTS_CUDARENDER)
+    applyPaletteHostRenderSupport(desc, true, false);
+#else
+    applyPaletteHostRenderSupport(desc, false, false);
+#endif
 }
 
 void LSPPalettePluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc, OFX::ContextEnum ctx) {

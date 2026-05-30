@@ -1,6 +1,16 @@
 # LSP - Color Palette (OFX)
 
-**Color Palette** is an OFX plug-in for DaVinci Resolve (and other OFX hosts) that extracts a dominant-color palette from an image and composites it with the picture. The plugin uses a median cut algorithm in [OKLAB](https://bottosson.github.io/posts/oklab/) to decompose the main colors of the image, along with a simple high-pass filter to exclude details.
+**Color Palette** is an OFX plug-in for DaVinci Resolve (and other OFX hosts) that extracts a dominant-color palette from an image and composites it with the picture.
+
+**Color extraction** uses **OKLab median cut** on downscaled samples (cross-5 neighborhood average per cell, then median-cut clustering). Heavy work runs on the GPU where possible; **median cut and sort stay on CPU**.
+
+- **Metal (macOS):** GPU downsample → GPU OKLab sample gather → CPU median cut → CPU sort.
+- **CUDA / OpenCL:** GPU composite (and downsample where wired); extract gather on CPU slab today.
+- **CPU-readable hosts:** CPU downscale + gather → CPU median cut.
+
+**Swatch ordering** (Weight, Lightness, Hue, Saturation, Smooth) uses [OKLAB](https://bottosson.github.io/posts/oklab/) after extract.
+
+**Compositing** uses host GPU buffers when available (**Metal** on macOS, **CUDA** or **OpenCL** on Windows/Linux), with CPU fallback. Extract and composite plans are **cached** across frames when the source fingerprint and parameters are unchanged.
 
 ![LSP - Color Palette demonstration](img/PALETTE_01.jpg)
 
@@ -134,6 +144,28 @@ Use the bundle inside **`release/LSP_Color_Palette_<version>_linux/`**. Copy it 
 
 Use **Open Log** in the plug-in SUPPORT section.
 
+With **`LSP_PALETTE_GPU_STAGE_DEBUG=1`**, the log also records GPU backend choice (`metal_host`, `extract_gpu_gather`, `extract_cache_fast`, cache hits/misses, etc.).
+
+## GPU paths and debugging
+
+| Platform | Composite (overlay) | Palette extract (cache miss) |
+|----------|---------------------|----------------------------|
+| macOS | Host **Metal** buffers → `LSPPalette.metallib` composite kernel | GPU downsample + GPU OKLab gather; **CPU median cut** |
+| Windows | Host **CUDA** (optional **OpenCL**) | CPU gather + median cut from slab (composite on GPU) |
+| Linux | **CUDA** if built with `PALETTE_LINUX_CUDA=ON`, else **OpenCL** | Same as Windows |
+| CPU-only OFX image | CPU composite fallback | CPU downscale + gather + median cut |
+
+Optional environment variables (read once at load):
+
+| Variable | Effect |
+|----------|--------|
+| `LSP_PALETTE_GPU_STAGE_DEBUG=1` | Log extract/composite backend and cache stats |
+| `LSP_PALETTE_METAL_RENDER_MODE=INTERNAL` | macOS: do not use host Metal for composite |
+| `LSP_PALETTE_DISABLE_OPENCL=1` | Skip OpenCL on Windows/Linux |
+| `LSP_PALETTE_FORCE_OPENCL=1` | Prefer OpenCL over CUDA when both are built |
+
+Manual QA checklist (CPU vs GPU parity, fallbacks, playback cache): [tools/palette_gpu_parity.md](tools/palette_gpu_parity.md).
+
 ## macOS Gatekeeper (unsigned builds)
 
 Release builds are **not signed or notarized**. After you copy the bundle into an OFX folder, macOS may block it from loading in Resolve.
@@ -156,12 +188,16 @@ Quit Resolve completely, then reopen it.
 ```
 CMakeLists.txt          # Root build (macOS + Windows + Linux)
 cmake/                  # ColorPaletteVersion, ColorPaletteApple, ColorPaletteWindows, ColorPaletteLinux, ColorPaletteCommon
-plugin/core/            # Portable OFX logic (CPU render + palette extract/composite)
-plugin/metal/           # macOS MPS grid blur (optional acceleration)
-common/color/           # Vendored ColorManagement
+plugin/core/            # OFX plugin, extract/composite, GPU extract dispatch, render cache
+plugin/metal/           # LSPPalette.metal (composite + downsample), LSPPaletteExtract.metal (gather)
+plugin/cuda/            # Composite kernels (Windows/Linux CUDA builds)
+plugin/opencl/          # Composite kernels (embedded .cl source)
+common/color/           # Vendored ColorManagement (gamut / transfer decode)
 openfx-sdk/             # Vendored minimal OpenFX 1.5.1 + Support layer
-tools/                  # Optional build helpers (see tools/README.md)
+tools/                  # Build helpers; palette_gpu_parity.md for GPU QA
 ```
+
+macOS bundles ship **`Contents/Resources/LSPPalette.metallib`** (composite, downsample, and gather kernels).
 
 Build intermediates: `build/macos/`, `build/windows/`, or `build/linux/`.  
 Shippable output: `release/LSP_Color_Palette_<version>_<platform>/`.

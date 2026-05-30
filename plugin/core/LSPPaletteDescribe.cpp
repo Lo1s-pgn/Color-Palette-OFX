@@ -155,3 +155,18 @@ void describePaletteInContext(OFX::ImageEffectDescriptor& d, OFX::ContextEnum /*
     page->addChild(*grpPalette);
     page->addChild(*grpSupport);
 }
+
+void applyPaletteHostRenderSupport(OFX::ImageEffectDescriptor& d, bool advertiseHostCuda, bool advertiseHostMetal) {
+#if defined(OFX_SUPPORTS_CUDARENDER)
+    d.setSupportsCudaRender(advertiseHostCuda);
+    d.setSupportsCudaStream(advertiseHostCuda);
+#elif defined(__APPLE__)
+    d.setSupportsMetalRender(advertiseHostMetal);
+    d.setSupportsCudaRender(false);
+    d.setSupportsCudaStream(false);
+#else
+    (void)advertiseHostMetal;
+    d.setSupportsCudaRender(false);
+    d.setSupportsCudaStream(false);
+#endif
+}

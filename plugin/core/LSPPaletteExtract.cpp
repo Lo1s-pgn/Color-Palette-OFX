@@ -1,6 +1,6 @@
 #include "LSPPaletteExtract.h"
 
-#include "LSPPaletteGridBlur.h"
+#include "LSPPaletteExtractInternal.h"
 #include "LSPPaletteImageAccess.h"
 
 #include <algorithm>
@@ -499,115 +499,21 @@ bool averageLinearCross5Cell(const OfxRectI& bounds, int rowBytes, const float* 
     return !linearIsNearBlack(outLin);
 }
 
-static float analysisSigmaFromStrength(float strength, int nw, int nh) {
-    const float s = 0.25f + 4.0f * std::clamp(strength, 0.0f, 1.0f);
-    const int m = std::min(nw, nh);
-    return std::min(s, 0.38f * static_cast<float>(m));
-}
-
-} // namespace
-
-bool LSPPaletteExtract::extractDominantColors(OFX::Image* src, const OfxRectI& sampleBounds,
-    const Settings& settings, std::vector<Swatch>& outPalette) {
+bool detailFinishPalette(std::vector<LSPPaletteExtractInternal::OkLabSample>& samples,
+    const LSPPaletteExtract::Settings& settings,
+    std::vector<LSPPaletteExtract::Swatch>& outPalette) {
     outPalette.clear();
-    if (!src || !src->getPixelData())
-        return false;
-
-    const int rowBytes = src->getRowBytes();
-    const float* slab = LSPPaletteImageAccess::cpuReadableSlab(src);
-    if (!slab)
-        return false;
-
-    const int fw = sampleBounds.x2 - sampleBounds.x1;
-    const int fh = sampleBounds.y2 - sampleBounds.y1;
-    if (fw < 2 || fh < 2)
-        return false;
-
-    int k = std::clamp(settings.patchCount, 3, 24);
-    const int maxSide = kPaletteMaxAnalysisSide;
-    const int sampleCap = kPaletteSampleCap;
-
-    int nw = fw;
-    int nh = fh;
-    const int longSide = std::max(fw, fh);
-    if (longSide > maxSide) {
-        const float scale = static_cast<float>(maxSide) / static_cast<float>(longSide);
-        nw = std::max(2, static_cast<int>(std::floor(static_cast<float>(fw) * scale)));
-        nh = std::max(2, static_cast<int>(std::floor(static_cast<float>(fh) * scale)));
-    }
-
-    const int gridCells = nw * nh;
     std::vector<OkLabW> okSamples;
-    okSamples.reserve(static_cast<std::size_t>(std::min(gridCells, sampleCap)));
-
-    std::vector<int> sampleIndices;
-    sampleIndices.reserve(static_cast<std::size_t>(std::min(gridCells, sampleCap)));
-
-    const float detailW = std::clamp(settings.detailSuppression, 0.0f, 1.0f);
-    const bool useBlurGrid = detailW > 1.0e-5f;
-    std::vector<float> gridLin;
-    if (useBlurGrid)
-        gridLin.assign(static_cast<std::size_t>(nw * nh * 4), 0.0f);
-
-    for (int idx = 0; idx < gridCells; ++idx) {
-        if (static_cast<int>(sampleIndices.size()) >= sampleCap)
-            break;
-        const int tx = idx % nw;
-        const int ty = idx / nw;
-        int sx = sampleBounds.x1 + (tx * fw) / nw;
-        int sy = sampleBounds.y1 + (ty * fh) / nh;
-        sx = std::clamp(sx, sampleBounds.x1, sampleBounds.x2 - 1);
-        sy = std::clamp(sy, sampleBounds.y1, sampleBounds.y2 - 1);
-        if (!LSPPaletteImageAccess::rgbaAtFromSlab(sampleBounds, rowBytes, slab, sx, sy))
-            continue;
-        WorkshopColor::Vec3f lin{};
-        if (!averageLinearCross5Cell(sampleBounds, rowBytes, slab, sx, sy, settings.transfer, lin))
-            continue;
-        if (useBlurGrid) {
-            const int gi = (ty * nw + tx) * 4;
-            gridLin[static_cast<std::size_t>(gi + 0)] = lin.x;
-            gridLin[static_cast<std::size_t>(gi + 1)] = lin.y;
-            gridLin[static_cast<std::size_t>(gi + 2)] = lin.z;
-            gridLin[static_cast<std::size_t>(gi + 3)] = 1.0f;
-        }
-        okSamples.push_back({ linearRgbToOkLabForSort(lin, settings.primaries), 1.0 });
-        sampleIndices.push_back(idx);
+    okSamples.reserve(samples.size());
+    for (const LSPPaletteExtractInternal::OkLabSample& s : samples) {
+        OkLabW w;
+        w.lab.L = s.L;
+        w.lab.a = s.a;
+        w.lab.b = s.b;
+        w.w = s.w;
+        okSamples.push_back(w);
     }
-
-    if (useBlurGrid && !sampleIndices.empty()) {
-        const float sigma = analysisSigmaFromStrength(detailW, nw, nh);
-        std::vector<float> blurred(static_cast<std::size_t>(nw * nh * 4));
-        std::vector<float> tmp(static_cast<std::size_t>(nw * nh * 4));
-        if (!LSPPaletteGridBlur::tryMpsGaussianBlur(gridLin.data(), blurred.data(), nw, nh, sigma))
-            LSPPaletteGridBlur::cpuGaussianBlur(gridLin.data(), blurred.data(), nw, nh, sigma, tmp.data());
-        const float om = 1.0f - detailW;
-        for (std::size_t i = 0; i < static_cast<std::size_t>(nw * nh * 4); i += 4) {
-            gridLin[i + 0] = gridLin[i + 0] * om + blurred[i + 0] * detailW;
-            gridLin[i + 1] = gridLin[i + 1] * om + blurred[i + 1] * detailW;
-            gridLin[i + 2] = gridLin[i + 2] * om + blurred[i + 2] * detailW;
-            gridLin[i + 3] = 1.0f;
-        }
-        std::vector<int> filteredIdx;
-        std::vector<OkLabW> newOk;
-        filteredIdx.reserve(sampleIndices.size());
-        newOk.reserve(sampleIndices.size());
-        for (int idx : sampleIndices) {
-            const int tx = idx % nw;
-            const int ty = idx / nw;
-            const int gi = (ty * nw + tx) * 4;
-            WorkshopColor::Vec3f lin{ gridLin[static_cast<std::size_t>(gi + 0)], gridLin[static_cast<std::size_t>(gi + 1)],
-                gridLin[static_cast<std::size_t>(gi + 2)] };
-            if (linearIsNearBlack(lin))
-                continue;
-            filteredIdx.push_back(idx);
-            newOk.push_back({ linearRgbToOkLabForSort(lin, settings.primaries), 1.0 });
-        }
-        sampleIndices.swap(filteredIdx);
-        okSamples.swap(newOk);
-        if (sampleIndices.empty())
-            return false;
-    }
-
+    int k = std::clamp(settings.patchCount, 3, 24);
     const int sampleCount = static_cast<int>(okSamples.size());
     if (sampleCount < 1)
         return false;
@@ -669,7 +575,6 @@ bool LSPPaletteExtract::extractDominantColors(OFX::Image* src, const OfxRectI& s
         };
         std::sort(order.begin(), order.end(), cmpLightness);
     } else if (settings.sortOrder == 2) {
-        /** OKLAB a–b radius below this: hue angle is unreliable; group after chromatic swatches, ordered by L. */
         constexpr float kHueSortAchromaticChroma = 0.002f;
         auto cmpHueOrder = [&](int ia, int ib) -> bool {
             const OkLab& a = labs[static_cast<std::size_t>(ia)];
@@ -718,10 +623,93 @@ bool LSPPaletteExtract::extractDominantColors(OFX::Image* src, const OfxRectI& s
     } else
         std::sort(order.begin(), order.end(), cmpWeight);
 
-    std::vector<Swatch> sorted(static_cast<std::size_t>(k));
+    std::vector<LSPPaletteExtract::Swatch> sorted(static_cast<std::size_t>(k));
     for (int i = 0; i < k; ++i)
         sorted[static_cast<std::size_t>(i)] = outPalette[static_cast<std::size_t>(order[static_cast<std::size_t>(i)])];
     outPalette.swap(sorted);
 
     return true;
 }
+
+} // namespace
+
+bool LSPPaletteExtract::extractDominantColorsFromSlab(const float* slab,
+    int rowBytes,
+    const OfxRectI& sampleBounds,
+    const Settings& settings,
+    std::vector<Swatch>& outPalette) {
+    outPalette.clear();
+    if (!slab || rowBytes < 16)
+        return false;
+
+    const int fw = sampleBounds.x2 - sampleBounds.x1;
+    const int fh = sampleBounds.y2 - sampleBounds.y1;
+    if (fw < 2 || fh < 2)
+        return false;
+
+    int k = std::clamp(settings.patchCount, 3, 24);
+    const int maxSide = kPaletteMaxAnalysisSide;
+    const int sampleCap = kPaletteSampleCap;
+
+    int nw = fw;
+    int nh = fh;
+    const int longSide = std::max(fw, fh);
+    if (longSide > maxSide) {
+        const float scale = static_cast<float>(maxSide) / static_cast<float>(longSide);
+        nw = std::max(2, static_cast<int>(std::floor(static_cast<float>(fw) * scale)));
+        nh = std::max(2, static_cast<int>(std::floor(static_cast<float>(fh) * scale)));
+    }
+
+    const int gridCells = nw * nh;
+    std::vector<OkLabW> okSamples;
+    okSamples.reserve(static_cast<std::size_t>(std::min(gridCells, sampleCap)));
+
+    for (int idx = 0; idx < gridCells; ++idx) {
+        if (static_cast<int>(okSamples.size()) >= sampleCap)
+            break;
+        const int tx = idx % nw;
+        const int ty = idx / nw;
+        int sx = sampleBounds.x1 + (tx * fw) / nw;
+        int sy = sampleBounds.y1 + (ty * fh) / nh;
+        sx = std::clamp(sx, sampleBounds.x1, sampleBounds.x2 - 1);
+        sy = std::clamp(sy, sampleBounds.y1, sampleBounds.y2 - 1);
+        if (!LSPPaletteImageAccess::rgbaAtFromSlab(sampleBounds, rowBytes, slab, sx, sy))
+            continue;
+        WorkshopColor::Vec3f lin{};
+        if (!averageLinearCross5Cell(sampleBounds, rowBytes, slab, sx, sy, settings.transfer, lin))
+            continue;
+        okSamples.push_back({ linearRgbToOkLabForSort(lin, settings.primaries), 1.0 });
+    }
+
+    std::vector<LSPPaletteExtractInternal::OkLabSample> packed;
+    packed.reserve(okSamples.size());
+    for (const OkLabW& s : okSamples) {
+        LSPPaletteExtractInternal::OkLabSample o;
+        o.L = s.lab.L;
+        o.a = s.lab.a;
+        o.b = s.lab.b;
+        o.w = s.w;
+        packed.push_back(o);
+    }
+    return LSPPaletteExtractInternal::finishPalette(packed, settings, outPalette);
+}
+
+bool LSPPaletteExtract::extractDominantColors(OFX::Image* src, const OfxRectI& sampleBounds,
+    const Settings& settings, std::vector<Swatch>& outPalette) {
+    if (!src || !src->getPixelData())
+        return false;
+    const float* slab = LSPPaletteImageAccess::cpuReadableSlab(src);
+    if (!slab)
+        return false;
+    return extractDominantColorsFromSlab(slab, src->getRowBytes(), sampleBounds, settings, outPalette);
+}
+
+namespace LSPPaletteExtractInternal {
+
+bool finishPalette(std::vector<OkLabSample>& samples,
+    const LSPPaletteExtract::Settings& settings,
+    std::vector<LSPPaletteExtract::Swatch>& outPalette) {
+    return detailFinishPalette(samples, settings, outPalette);
+}
+
+} // namespace LSPPaletteExtractInternal

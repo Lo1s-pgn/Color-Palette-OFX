@@ -497,8 +497,34 @@ void LSPPaletteComposite::compositeImageCellCPU(OFX::Image* dst,
     const float sySpan = static_cast<float>(srcBounds.y2 - srcBounds.y1);
 
     for (int y = renderWindow.y1; y < renderWindow.y2; ++y) {
+        if (y < dstBounds.y1 || y >= dstBounds.y2)
+            continue;
+        bool rowHasPicture = false;
+        if (pw > 1e-4f && ph > 1e-4f) {
+            const float fy = static_cast<float>(y) + 0.5f;
+            if (fy >= frame.picY0 && fy < frame.picY1) {
+                const float x0 = static_cast<float>(renderWindow.x1) + 0.5f;
+                const float x1 = static_cast<float>(renderWindow.x2) - 0.5f;
+                if (x1 >= frame.picX0 && x0 < frame.picX1)
+                    rowHasPicture = true;
+            }
+        }
+        if (!rowHasPicture) {
+            float* rowBase = static_cast<float*>(dst->getPixelAddress(renderWindow.x1, y));
+            if (rowBase) {
+                const int xEnd = std::min(renderWindow.x2, dstBounds.x2);
+                for (int x = std::max(renderWindow.x1, dstBounds.x1); x < xEnd; ++x) {
+                    float* p = rowBase + static_cast<std::size_t>(x - renderWindow.x1) * 4u;
+                    p[0] = br;
+                    p[1] = bgc;
+                    p[2] = bb;
+                    p[3] = 1.0f;
+                }
+            }
+            continue;
+        }
         for (int x = renderWindow.x1; x < renderWindow.x2; ++x) {
-            if (x < dstBounds.x1 || x >= dstBounds.x2 || y < dstBounds.y1 || y >= dstBounds.y2)
+            if (x < dstBounds.x1 || x >= dstBounds.x2)
                 continue;
 
             if (x >= layout.bgX0 && x < layout.bgX1 && y >= layout.bgY0 && y < layout.bgY1) {

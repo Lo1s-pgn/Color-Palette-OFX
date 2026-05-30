@@ -283,6 +283,15 @@ inline void writeErrorLine(const std::string& message) {
     f.flush();
 }
 
+inline void writeInfoLine(const std::string& message) {
+    std::lock_guard<std::mutex> lock(getLogMutex());
+    std::ofstream f;
+    if (!openLogFile(f))
+        return;
+    f << getTimestamp() << " [info] " << message << "\n";
+    f.flush();
+}
+
 } // namespace LSPPaletteLog
 
 #define LSP_PALETTE_LOG_ERROR(msg) LSPPaletteLog::writeErrorLine(std::string(msg))

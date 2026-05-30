@@ -12,8 +12,6 @@ struct Settings {
     WorkshopColor::TransferFunctionId transfer = WorkshopColor::TransferFunctionId::Gamma24;
     int patchCount = 8;
     int sortOrder = 0;
-    /** Blend toward Gaussian low-pass on the analysis grid (plug-in uses 0.5f; 0.f disables blur path). */
-    float detailSuppression = 0.5f;
 };
 
 struct Swatch {
@@ -23,5 +21,22 @@ struct Swatch {
 
 bool extractDominantColors(
     OFX::Image* src, const OfxRectI& sampleBounds, const Settings& settings, std::vector<Swatch>& outPalette);
+
+/** Row-major RGBA float slab; rowBytes is host image row pitch (may exceed width*16). */
+bool extractDominantColorsFromSlab(const float* slab,
+    int rowBytes,
+    const OfxRectI& sampleBounds,
+    const Settings& settings,
+    std::vector<Swatch>& outPalette);
+
+#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+/** Tight analysis RGBA slab (e.g. GPU-downscaled); median-cut remains on CPU. */
+bool extractDominantColorsFromAnalysisSlabGpu(const float* slab,
+    int rowBytes,
+    const OfxRectI& sampleBounds,
+    void* metalCommandQueue,
+    const Settings& settings,
+    std::vector<Swatch>& outPalette);
+#endif
 
 } // namespace LSPPaletteExtract

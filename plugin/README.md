@@ -1,15 +1,44 @@
 # Plugin sources — LSP - Color Palette
 
-- **`core/LSPPalettePlugin.cpp`** — **`ImageEffect`**: **`render`** (**`extractDominantColors`** every call, **`buildCompositePlan`**, **`LSPPaletteProcessor`**), **`changedParam`** (Help / Issues / Open Log), session log header.
-- **`core/LSPPaletteDescribe.cpp`** — **INPUT COLOR**, **PALETTE** (layout, **`paletteFullFrame`**, …), **SUPPORT**.
-- **`core/LSPPaletteExtract.cpp`** — OKLAB **median cut** on weighted grid samples; inverse OKLAB → linear primaries RGB; optional blur; canonical OKLAB slot order; strip order from **`paletteSortOrder`** (Weight / Lightness / Hue / Saturation).
-- **`core/LSPPaletteGridBlur.{h,cpp}`** — Separable Gaussian (replicate edge) on **RGBA32F** row-major grids for extraction.
-- **`metal/LSPPaletteGridBlurMPS.mm`** — **`MPSImageGaussianBlur`** path for the same grid when Metal/MPS succeed (macOS only, Objective-C++).
-- **`core/LSPPaletteGridBlurMPSStub.cpp`** — Non-macOS stub: **`tryMpsGaussianBlur`** returns false (CPU path always used).
-- **`core/LSPPaletteComposite.cpp`** — **`buildCompositePlan`**: strip + picture layout; **Gap** insets; **`paletteFullFrame`** = wide strip + cover; neutral **bgLightness** bar; **`drawPaletteSwatchesFromLayout`**. **OFX coords**: bottom-left, **y up**.
-- **`core/LSPPaletteImageAccess.cpp`** — **`cpuReadableSlab`** for OFX CPU float RGBA (`getPixelAddress`); **`rgbaAtFromSlab`** for row-major slab indexing.
-- **`core/LSPPaletteProcessor.cpp`** — CPU multi-thread **`compositeImageCellCPU`** vs full-window copy; **`postProcess`** draws rounded swatches.
-- **`core/LSPPaletteUtil.cpp`** — Open URL / log file (macOS **`open`**, Windows **`ShellExecuteA`**, Linux **`xdg-open`**).
-- **`core/LSPPaletteLog.h`** — Mutex logging; platform-specific log paths under **`LSP/ColorPalette.log`**.
-- **`core/LSPPaletteConstants.h`** — **`kPluginIdentifier`**, repo URLs, **`LSP/Color`**, **`version_gen.h`**.
-- **`../common/color/ColorManagement.*`** — WorkshopColor (gamut / transfer / encode / decode).
+## Core OFX
+
+- **`core/LSPPalettePlugin.cpp`** — **`ImageEffect`**: **`render`** (fingerprint cache, palette extract, composite plan cache, host Metal/CUDA/OpenCL or **`LSPPaletteProcessor`**), cache invalidation, SUPPORT actions.
+- **`core/LSPPaletteDescribe.cpp`** — **INPUT COLOR**, **PALETTE**, **SUPPORT**; host render flags (Metal on macOS, CUDA on Windows).
+- **`core/LSPPaletteRenderCache.cpp`** — Extract/plan cache keyed by source fingerprint + params.
+- **`core/LSPPaletteRuntimeEnv.cpp`** — **`LSP_PALETTE_GPU_STAGE_DEBUG`**, Metal/CUDA/OpenCL composite preferences.
+
+## Palette extract (OKLab median cut)
+
+- **`core/LSPPaletteExtract.cpp`** — CPU gather fallback, **`medianCutOkLab`**, **`applyPaletteSortOrder`**.
+- **`core/LSPPaletteExtractInternal.h`** — Shared **`finishPalette`** (median cut + sort).
+- **`core/LSPPaletteGpuExtractShared.h`** — Gather kernel params / sample struct (C++ / Metal).
+- **`core/LSPPaletteAnalysis.cpp`** — Downscaled grid sizing; CPU downscale when needed.
+- **`metal/LSPPaletteExtract.metal`** — **`LSPPaletteGatherSamplesKernel`** (decode, primaries→sRGB, OKLab).
+- **`metal/LSPPaletteExtractGpu.mm`** — Metal gather + CPU **`finishPalette`**.
+- **`metal/LSPPaletteMetalStage.mm`** — Host-buffer downsample + staging for extract.
+
+## Composite and render
+
+- **`core/LSPPaletteComposite.cpp`** — **`buildCompositePlan`**, CPU swatch draw.
+- **`core/LSPPaletteProcessor.cpp`** — CPU composite; internal GPU via **`LSPPaletteRenderProcessor`**.
+- **`core/LSPPaletteRenderProcessor.cpp`** — Metal / CUDA / OpenCL composite.
+- **`core/LSPPaletteGpuParams.cpp`** — GPU param packing.
+
+## Image access
+
+- **`core/LSPPaletteImageAccess.cpp`** — **`cpuReadableSlab`** for CPU float RGBA only. Do not use **`getPixelAddress`** on Metal/CUDA device buffers.
+
+## GPU backends
+
+| Path | Files |
+|------|--------|
+| **Metal** | **`metal/LSPPalette.metal`** (composite + downsample), **`metal/LSPPaletteExtract.metal`** (gather) → **`LSPPalette.metallib`**; **`LSPPaletteMetal.mm`**, **`LSPPaletteMetalStage.mm`**, **`LSPPaletteExtractGpu.mm`** |
+| **CUDA** | **`cuda/LSPPalette.cu`** (composite) |
+| **OpenCL** | **`opencl/LSPPalette.cl`** (composite) |
+
+## Other
+
+- **`core/LSPPaletteUtil.cpp`**, **`LSPPaletteLog.h`**, **`LSPPaletteConstants.h`**
+- **`../common/color/ColorManagement.*`** — Gamut / transfer decode (six UI transfers mirrored in GPU kernels).
+
+**Coordinates:** OFX image space (origin bottom-left, **y up**).
