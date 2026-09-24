@@ -121,3 +121,7 @@ Quit and relaunch Resolve.
 ## SDK
 
 Vendored minimal OpenFX SDK in `openfx-sdk/`. Override with `-DOFX_SDK_PATH=...` if needed.
+
+## License
+
+Distributed under **GNU GPL v3**. See [LICENSE](LICENSE).
