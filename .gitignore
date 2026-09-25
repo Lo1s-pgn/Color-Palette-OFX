@@ -16,7 +16,7 @@ release/
 
 # Local maintainer scripts (not in repo)
 scripts/
-tools/make_release.sh
+tools/
 
 # Python
 __pycache__/
