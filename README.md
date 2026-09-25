@@ -78,10 +78,8 @@ Copy the bundle from your platform’s release folder into the host OFX plug-ins
 | Platform             | OFX folder                                   |
 | -------------------- | -------------------------------------------- |
 | macOS (all users)    | `/Library/OFX/Plugins/`                      |
-| macOS (current user) | `~/Library/OFX/Plugins/`                     |
 | Windows              | `C:\Program Files\Common Files\OFX\Plugins\` |
 | Linux (system)       | `/usr/OFX/Plugins/`                          |
-| Linux (user)         | `~/.local/share/OFX/Plugins/`                |
 
 
 **Resolve OFX cache** (delete if the plug-in does not appear after upgrade):
