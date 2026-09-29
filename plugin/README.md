@@ -15,7 +15,7 @@
 - **`core/LSPPaletteAnalysis.cpp`** — Downscaled grid sizing; CPU downscale when needed.
 - **`metal/LSPPaletteExtract.metal`** — **`LSPPaletteGatherSamplesKernel`** (decode, primaries→sRGB, OKLab).
 - **`metal/LSPPaletteExtractGpu.mm`** — Metal gather + CPU **`finishPalette`**.
-- **`metal/LSPPaletteMetalStage.mm`** — Host-buffer downsample + staging for extract.
+- **`metal/LSPPaletteMetal.mm`** — Host Metal downsample + composite; Plugin stages extract via **`downsampleHostToCpu`**.
 
 ## Composite and render
 
@@ -26,13 +26,13 @@
 
 ## Image access
 
-- **`core/LSPPaletteImageAccess.cpp`** — **`cpuReadableSlab`** for CPU float RGBA only. Do not use **`getPixelAddress`** on Metal/CUDA device buffers.
+- **`core/LSPPaletteImageAccess.h`** — **`cpuReadableSlab`** / **`rgbaAtFromSlab`** for CPU float RGBA only. Do not use **`getPixelAddress`** on Metal/CUDA device buffers.
 
 ## GPU backends
 
 | Path | Files |
 |------|--------|
-| **Metal** | **`metal/LSPPalette.metal`** (composite + downsample), **`metal/LSPPaletteExtract.metal`** (gather) → **`LSPPalette.metallib`**; **`LSPPaletteMetal.mm`**, **`LSPPaletteMetalStage.mm`**, **`LSPPaletteExtractGpu.mm`** |
+| **Metal** | **`metal/LSPPalette.metal`** (composite + downsample), **`metal/LSPPaletteExtract.metal`** (gather) → **`LSPPalette.metallib`**; **`LSPPaletteMetal.mm`**, **`LSPPaletteExtractGpu.mm`** |
 | **CUDA** | **`cuda/LSPPalette.cu`** (composite) |
 | **OpenCL** | **`opencl/LSPPalette.cl`** (composite) |
 

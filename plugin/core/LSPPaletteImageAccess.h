@@ -1,13 +1,9 @@
 #pragma once
 
-#include "ofxsCore.h"
+#include "ofxsImageEffect.h"
 
 #include <cstddef>
 #include <cstdint>
-
-namespace OFX {
-class Image;
-}
 
 namespace LSPPaletteImageAccess {
 
@@ -22,7 +18,16 @@ inline const float* rgbaAtFromSlab(const OfxRectI& bounds, int rowBytes, const f
             + static_cast<std::size_t>(x - bounds.x1) * sizeof(float) * 4u);
 }
 
-// copy OFX image into one tight rgba slab
-const float* cpuReadableSlab(OFX::Image* img);
+// acces slab CPU
+inline const float* cpuReadableSlab(OFX::Image* img) {
+    if (!img)
+        return nullptr;
+    const OfxRectI bounds = img->getBounds();
+    const int rowBytes = img->getRowBytes();
+    const int h = bounds.y2 - bounds.y1;
+    if (h < 1 || rowBytes < 16)
+        return nullptr;
+    return static_cast<const float*>(img->getPixelAddress(bounds.x1, bounds.y1));
+}
 
 } // namespace LSPPaletteImageAccess

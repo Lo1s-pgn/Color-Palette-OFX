@@ -5,7 +5,7 @@
 #include <cstring>
 #include <vector>
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
 #include "LSPPaletteMetal.h"
 #endif
 
@@ -27,7 +27,7 @@ bool LSPPaletteRenderProcessor::renderWithLayout(const float* src,
     size_t srcRowBytes,
     size_t dstRowBytes,
     bool preferCuda) {
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
     if (renderMetal(src, dst, width, height, srcRowBytes, dstRowBytes)) {
         LSPPaletteRuntimeEnv::logGpuBackend("metal_internal");
         return true;
@@ -56,7 +56,7 @@ bool LSPPaletteRenderProcessor::renderWithLayout(const float* src,
     return false;
 }
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
 bool LSPPaletteRenderProcessor::renderMetal(
     const float* src, float* dst, int width, int height, size_t srcRowBytes, size_t dstRowBytes) {
     return LSPPaletteMetal::render(src, dst, width, height, srcRowBytes, dstRowBytes, params_);

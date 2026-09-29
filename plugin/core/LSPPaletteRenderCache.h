@@ -12,7 +12,6 @@
 // keeps palette and layout around while scrubbing playback
 struct LSPPaletteRenderCache {
     struct ExtractKey {
-        double time = -1.0;
         int patchCount = 0;
         int sortOrder = 0;
         WorkshopColor::ColorPrimariesId primaries = WorkshopColor::ColorPrimariesId::Rec709;

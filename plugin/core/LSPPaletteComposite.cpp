@@ -131,7 +131,6 @@ bool LSPPaletteComposite::buildCompositePlan(const OfxRectI& dstBounds,
     const OfxRectI& srcBounds,
     const std::vector<LSPPaletteExtract::Swatch>& palette,
     WorkshopColor::TransferFunctionId transfer,
-    WorkshopColor::ColorPrimariesId primaries,
     const Presentation& pres,
     OverlayLayout& out,
     CompositeFrame& frameOut) {
@@ -462,7 +461,6 @@ bool LSPPaletteComposite::buildCompositePlan(const OfxRectI& dstBounds,
     frameOut.innerX2 = imgX2;
     frameOut.innerY2 = imgY2;
 
-    (void)primaries;
     return !out.swatches.empty();
 }
 

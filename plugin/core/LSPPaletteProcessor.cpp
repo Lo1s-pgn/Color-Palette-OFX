@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
 #include "LSPPaletteMetal.h"
 #endif
 
@@ -42,7 +42,7 @@ void LSPPaletteProcessor::setCompositorState(
     gpuCompositeDone_ = false;
 }
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
 bool LSPPaletteProcessor::tryMetalPassthrough() {
     if (!_isEnabledMetalRender || _pMetalCmdQ == nullptr || !_dstImg || !srcImg_)
         return false;
@@ -80,7 +80,7 @@ bool LSPPaletteProcessor::tryGpuComposite() {
     const size_t srcRowBytes = srcRb < 0 ? static_cast<size_t>(-srcRb) : static_cast<size_t>(srcRb);
     const size_t dstRowBytes = dstRb < 0 ? static_cast<size_t>(-dstRb) : static_cast<size_t>(dstRb);
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
     if (_isEnabledMetalRender && _pMetalCmdQ != nullptr && LSPPaletteRuntimeEnv::preferHostMetal()) {
         const void* srcMetal = srcImg_->getPixelData();
         void* dstMetal = _dstImg->getPixelData();
@@ -134,7 +134,7 @@ bool LSPPaletteProcessor::tryGpuComposite() {
     return false;
 }
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
 void LSPPaletteProcessor::processImagesMetal() {
     if (drawOverlay_ && overlayValid_ && tryGpuComposite())
         return;
@@ -180,7 +180,7 @@ void LSPPaletteProcessor::multiThreadProcessImages(OfxRectI window) {
 void LSPPaletteProcessor::postProcess() {
     if (gpuCompositeDone_ || !_dstImg || !drawOverlay_ || !overlayValid_)
         return;
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
     if (_isEnabledMetalRender)
         return;
 #endif

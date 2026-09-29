@@ -33,7 +33,7 @@ bool extractDominantColorsFromSlab(const float* slab,
     std::vector<Swatch>& outPalette,
     std::vector<Swatch>* outClusterUnsorted = nullptr);
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
 // gpu downscaled slab, clustering still on cpu
 bool extractDominantColorsFromAnalysisSlabGpu(const float* slab,
     int rowBytes,

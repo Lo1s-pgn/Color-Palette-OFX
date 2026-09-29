@@ -17,7 +17,7 @@ public:
         size_t dstRowBytes,
         bool preferCuda);
 
-#if defined(__APPLE__) && !defined(LSP_PALETTE_VIEWER_CPU_ONLY)
+#if defined(__APPLE__)
     bool renderMetal(const float* src, float* dst, int width, int height, size_t srcRowBytes, size_t dstRowBytes);
     bool renderMetalHostBuffers(const void* srcMetal,
         void* dstMetal,

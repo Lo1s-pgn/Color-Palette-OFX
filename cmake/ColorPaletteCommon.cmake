@@ -9,7 +9,6 @@ endif()
 set(PALETTE_PLUGIN_CORE_SRCS
   "${CMAKE_SOURCE_DIR}/common/color/ColorManagement.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteUtil.cpp"
-  "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteImageAccess.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteAnalysis.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteExtract.cpp"
   "${CMAKE_SOURCE_DIR}/plugin/core/LSPPaletteComposite.cpp"

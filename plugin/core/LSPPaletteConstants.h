@@ -6,7 +6,7 @@
 #define kPluginName "LSP - Color Palette " PLUGIN_VERSION_STR
 #define kPluginGrouping "LSP - Color"
 #define kPluginDescription \
-    "LSP - Color Palette — dominant colors (LAB k-means), gamut/transfer-aware decode, overlay presentation (OFX)."
+    "LSP - Color Palette — dominant colors (OKLab median cut), gamut/transfer-aware decode, overlay presentation (OFX)."
 #define kPluginIdentifier PLUGIN_OFX_IDENTIFIER
 #define kPluginVersionMajor PLUGIN_VERSION_MAJOR
 #define kPluginVersionMinor PLUGIN_VERSION_MINOR

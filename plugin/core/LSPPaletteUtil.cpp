@@ -28,22 +28,26 @@ bool spawnDetached(const char* program, const char* arg) {
 }
 #endif
 
+void openPath(const std::string& path, const char* failTag) {
+    if (path.empty())
+        return;
+#if defined(_WIN32)
+    const HINSTANCE rc = ShellExecuteA(nullptr, "open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<intptr_t>(rc) <= 32)
+        LSP_PALETTE_LOG_ERROR(failTag);
+#elif defined(__APPLE__)
+    if (!spawnDetached("open", path.c_str()))
+        LSP_PALETTE_LOG_ERROR(failTag);
+#else
+    if (!spawnDetached("xdg-open", path.c_str()))
+        LSP_PALETTE_LOG_ERROR(failTag);
+#endif
+}
+
 } // namespace
 
 void lspPaletteOpenUrl(const std::string& url) {
-    if (url.empty())
-        return;
-#if defined(_WIN32)
-    const HINSTANCE rc = ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    if (reinterpret_cast<intptr_t>(rc) <= 32)
-        LSP_PALETTE_LOG_ERROR("open_url_failed");
-#elif defined(__APPLE__)
-    if (!spawnDetached("open", url.c_str()))
-        LSP_PALETTE_LOG_ERROR("open_url_failed");
-#else
-    if (!spawnDetached("xdg-open", url.c_str()))
-        LSP_PALETTE_LOG_ERROR("open_url_failed");
-#endif
+    openPath(url, "open_url_failed");
 }
 
 void lspPaletteOpenLogExternally() {
@@ -53,15 +57,5 @@ void lspPaletteOpenLogExternally() {
         std::ofstream touch(path, std::ios::app);
         (void)touch;
     }
-#if defined(_WIN32)
-    const HINSTANCE rc = ShellExecuteA(nullptr, "open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    if (reinterpret_cast<intptr_t>(rc) <= 32)
-        LSP_PALETTE_LOG_ERROR("open_log_failed");
-#elif defined(__APPLE__)
-    if (!spawnDetached("open", path.c_str()))
-        LSP_PALETTE_LOG_ERROR("open_log_failed");
-#else
-    if (!spawnDetached("xdg-open", path.c_str()))
-        LSP_PALETTE_LOG_ERROR("open_log_failed");
-#endif
+    openPath(path, "open_log_failed");
 }

@@ -46,8 +46,6 @@ bool LSPPaletteRenderCache::hasCachedClusterForParams(const ExtractKey& k) const
 }
 
 bool LSPPaletteRenderCache::extractKeyMatches(const ExtractKey& k) const {
-    (void)k.time;
-    (void)extractKey_.time;
     return extractKey_.patchCount == k.patchCount && extractKey_.sortOrder == k.sortOrder
         && extractKey_.primaries == k.primaries && extractKey_.transfer == k.transfer && extractKey_.srcW == k.srcW
         && extractKey_.srcH == k.srcH && extractKey_.sourceFingerprint == k.sourceFingerprint;
@@ -168,7 +166,7 @@ void LSPPaletteRenderCache::storePlan(const PresentationKey& key,
 
 void LSPPaletteRenderCache::invalidateAll() {
     std::lock_guard<std::mutex> lock(mutex_);
-    extractKey_.time = -1.0;
+    extractKey_.sourceFingerprint = 0;
     clusterKey_.sourceFingerprint = 0;
     planExtractKey_.sourceFingerprint = 0;
     presKey_.dstW = -1;

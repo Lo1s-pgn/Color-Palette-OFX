@@ -47,44 +47,6 @@ OkLab linearSrgbToOkLab(const WorkshopColor::Vec3f& rgb) {
     return o;
 }
 
-WorkshopColor::Mat3f invertMat3(const WorkshopColor::Mat3f& matrix) {
-    const float a00 = matrix.m[0][0];
-    const float a01 = matrix.m[0][1];
-    const float a02 = matrix.m[0][2];
-    const float a10 = matrix.m[1][0];
-    const float a11 = matrix.m[1][1];
-    const float a12 = matrix.m[1][2];
-    const float a20 = matrix.m[2][0];
-    const float a21 = matrix.m[2][1];
-    const float a22 = matrix.m[2][2];
-
-    const float c00 = a11 * a22 - a12 * a21;
-    const float c01 = a02 * a21 - a01 * a22;
-    const float c02 = a01 * a12 - a02 * a11;
-    const float c10 = a12 * a20 - a10 * a22;
-    const float c11 = a00 * a22 - a02 * a20;
-    const float c12 = a02 * a10 - a00 * a12;
-    const float c20 = a10 * a21 - a11 * a20;
-    const float c21 = a01 * a20 - a00 * a21;
-    const float c22 = a00 * a11 - a01 * a10;
-
-    const float det = a00 * c00 + a01 * c10 + a02 * c20;
-    if (std::fabs(det) <= 1e-12f)
-        return {};
-    const float invDet = 1.0f / det;
-    WorkshopColor::Mat3f out{};
-    out.m[0][0] = c00 * invDet;
-    out.m[0][1] = c01 * invDet;
-    out.m[0][2] = c02 * invDet;
-    out.m[1][0] = c10 * invDet;
-    out.m[1][1] = c11 * invDet;
-    out.m[1][2] = c12 * invDet;
-    out.m[2][0] = c20 * invDet;
-    out.m[2][1] = c21 * invDet;
-    out.m[2][2] = c22 * invDet;
-    return out;
-}
-
 WorkshopColor::Vec3f okLabToLinearSrgb(const OkLab& o) {
     WorkshopColor::Mat3f labFromLpm{};
     labFromLpm.m[0][0] = 0.2104542553f;
@@ -96,7 +58,7 @@ WorkshopColor::Vec3f okLabToLinearSrgb(const OkLab& o) {
     labFromLpm.m[2][0] = 0.0259040371f;
     labFromLpm.m[2][1] = 0.7827717662f;
     labFromLpm.m[2][2] = -0.8086757660f;
-    const WorkshopColor::Mat3f lpmFromLab = invertMat3(labFromLpm);
+    const WorkshopColor::Mat3f lpmFromLab = WorkshopColor::invert(labFromLpm);
     const WorkshopColor::Vec3f lpm =
         WorkshopColor::mul(lpmFromLab, WorkshopColor::Vec3f{ o.L, o.a, o.b });
     const float lms_l = lpm.x * lpm.x * lpm.x;
@@ -112,7 +74,7 @@ WorkshopColor::Vec3f okLabToLinearSrgb(const OkLab& o) {
     lmsFromRgb.m[2][0] = 0.0883024619f;
     lmsFromRgb.m[2][1] = 0.2817188376f;
     lmsFromRgb.m[2][2] = 0.6299787005f;
-    const WorkshopColor::Mat3f rgbFromLms = invertMat3(lmsFromRgb);
+    const WorkshopColor::Mat3f rgbFromLms = WorkshopColor::invert(lmsFromRgb);
     return WorkshopColor::mul(rgbFromLms, WorkshopColor::Vec3f{ lms_l, lms_m, lms_s });
 }
 

@@ -19,7 +19,6 @@ add_custom_target(colorpalette_gen_plist DEPENDS "${PALETTE_INFO_PLIST}")
 
 set(PALETTE_PLATFORM_EXTRA_SRCS
   "${CMAKE_SOURCE_DIR}/plugin/metal/LSPPaletteMetal.mm"
-  "${CMAKE_SOURCE_DIR}/plugin/metal/LSPPaletteMetalStage.mm"
   "${CMAKE_SOURCE_DIR}/plugin/metal/LSPPaletteExtractGpu.mm"
 )
 set(PALETTE_PLATFORM_INCLUDE_DIRS "")

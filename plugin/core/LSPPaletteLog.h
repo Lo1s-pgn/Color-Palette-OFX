@@ -1,7 +1,6 @@
 #pragma once
 /* log file per OS, header written when plugin loads */
 #include <chrono>
-#include <cstdint>
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
@@ -12,16 +11,11 @@
 #if defined(__APPLE__)
 #include <dlfcn.h>
 #include <limits.h>
-#include <sys/sysctl.h>
-#include <sys/utsname.h>
 #elif defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#elif defined(__unix__)
-#include <limits.h>
-#include <sys/utsname.h>
 #endif
 
 namespace LSPPaletteLog {
@@ -110,65 +104,6 @@ inline bool openLogFile(std::ofstream& f, std::ios_base::openmode mode = std::io
     return f.good();
 }
 
-inline int getCoreCount() {
-#if defined(__APPLE__)
-    int ncpu = 0;
-    size_t len = sizeof(ncpu);
-    if (sysctlbyname("hw.ncpu", &ncpu, &len, NULL, 0) == 0)
-        return ncpu;
-#elif defined(_WIN32)
-    SYSTEM_INFO info{};
-    GetSystemInfo(&info);
-    if (info.dwNumberOfProcessors > 0)
-        return static_cast<int>(info.dwNumberOfProcessors);
-#endif
-    return 0;
-}
-
-#if defined(__APPLE__) || defined(__unix__)
-inline void getUnameFields(std::string& sysname, std::string& nodename, std::string& release, std::string& version, std::string& machine) {
-    struct utsname u;
-    sysname = nodename = release = version = machine = "unknown";
-    if (uname(&u) == 0) {
-        sysname = u.sysname;
-        nodename = u.nodename;
-        release = u.release;
-        version = u.version;
-        machine = u.machine;
-    }
-}
-#endif
-
-inline std::string getCpuInfo() {
-#if defined(__APPLE__)
-    char buf[256];
-    size_t len = sizeof(buf);
-    if (sysctlbyname("machdep.cpu.brand_string", buf, &len, NULL, 0) == 0 && len > 0)
-        return std::string(buf, len - 1);
-    len = sizeof(buf);
-    if (sysctlbyname("hw.model", buf, &len, NULL, 0) == 0 && len > 0)
-        return std::string(buf, len - 1);
-#elif defined(_WIN32)
-    return std::string("Windows");
-#endif
-    return "unknown";
-}
-
-inline std::string getMemoryInfoMB() {
-#if defined(__APPLE__)
-    uint64_t memsize = 0;
-    size_t len = sizeof(memsize);
-    if (sysctlbyname("hw.memsize", &memsize, &len, NULL, 0) == 0)
-        return std::to_string(memsize / (1024 * 1024)) + " MB";
-#elif defined(_WIN32)
-    MEMORYSTATUSEX st{};
-    st.dwLength = sizeof(st);
-    if (GlobalMemoryStatusEx(&st))
-        return std::to_string(st.ullTotalPhys / (1024 * 1024)) + " MB";
-#endif
-    return "unknown";
-}
-
 #if defined(__APPLE__)
 static void paletteLogBundleAnchor() {}
 
@@ -219,55 +154,25 @@ inline void writeSessionStart(const std::string& pluginName,
     const std::string& hostName,
     const std::string& hostLabel,
     const std::string& hostVersion,
-    const std::string& buildInfo,
-    const std::string& bundlePath,
-    const std::string& gpuName) {
+    const std::string& bundlePath) {
     std::lock_guard<std::mutex> lock(getLogMutex());
     std::ofstream f;
     if (!openLogFile(f, std::ios::out))
         return;
-    const std::string bufTime = getTimestamp("%a %b %d %H:%M:%S %Y");
 
-    f << "------------------------------------------------------------\n";
-    f << "\t\t" << pluginName << "\n";
-    f << "------------------------------------------------------------\n";
-    f << "> Plugin Version\t: " << versionStr << "\n";
-    f << "> Timestamp\t\t: " << bufTime << "\n";
-    f << "> Host System Info: \n";
-
-#if defined(__APPLE__) || defined(__unix__)
-    std::string sysname, nodename, release, version, machine;
-    getUnameFields(sysname, nodename, release, version, machine);
-    (void)nodename;
-    f << "\t- OS: \n";
-    f << "\t\t" << sysname << "\n";
-    f << "\t\t" << release << "\n";
-    f << "\t\t" << version << "\n";
-    f << "\t\t" << machine << "\n";
-#elif defined(_WIN32)
-    f << "\t- OS: \n\t\tWindows\n";
-#endif
-    f << "\t- CPU: \n\t\t" << getCpuInfo() << "\n";
-    int cores = getCoreCount();
-    if (cores > 0)
-        f << "\t- Cores: \n\t\t" << cores << "\n";
-    f << "\t- Memory: \n\t\t" << getMemoryInfoMB() << "\n";
-    if (!gpuName.empty())
-        f << "\t- GPU: \n\t\t" << gpuName << "\n";
     std::string hostDisplay = hostLabel.empty() ? hostName : hostLabel;
     if (hostDisplay.empty())
-        hostDisplay = hostName.empty() ? "unknown" : hostName;
-    f << "\t- Host: \n\t\t" << hostDisplay << "\n";
+        hostDisplay = "unknown";
     if (!hostVersion.empty())
-        f << "\t- Host version: \n\t\t" << hostVersion << "\n";
-    if (!buildInfo.empty())
-        f << "\t- Build: \n\t\t" << buildInfo << "\n";
-    f << "\t- Renderer: \n\t\tCPU\n";
+        hostDisplay += " " + hostVersion;
 
-    f << "\n------------------------------------------------------------\n";
-    f << "[info] Logging start\n";
+    f << "------------------------------------------------------------\n";
+    f << pluginName << " " << versionStr << "\n";
+    f << getTimestamp("%a %b %d %H:%M:%S %Y") << "\n";
+    f << "Host: " << hostDisplay << "\n";
     if (!bundlePath.empty())
-        f << "[info] Bundle path: " << sanitizePathForLog(bundlePath) << "/\n";
+        f << "Bundle: " << sanitizePathForLog(bundlePath) << "\n";
+    f << "------------------------------------------------------------\n";
     f.flush();
 }
 
@@ -292,11 +197,5 @@ inline void writeInfoLine(const std::string& message) {
 } // namespace LSPPaletteLog
 
 #define LSP_PALETTE_LOG_ERROR(msg) LSPPaletteLog::writeErrorLine(std::string(msg))
-#define LSP_PALETTE_LOG_SESSION_START(n, v, hn, hl, hver, build, bundle, gpu) \
-    LSPPaletteLog::writeSessionStart(std::string(n), std::string(v), std::string(hn), std::string(hl), std::string(hver), std::string(build), std::string(bundle), std::string(gpu))
-
-#if defined(LSP_PALETTE_VERBOSE_LOG)
-#define LSP_PALETTE_TRACE(msg) LSPPaletteLog::writeErrorLine(std::string(msg))
-#else
-#define LSP_PALETTE_TRACE(msg) ((void)0)
-#endif
+#define LSP_PALETTE_LOG_SESSION_START(n, v, hn, hl, hver, bundle) \
+    LSPPaletteLog::writeSessionStart(std::string(n), std::string(v), std::string(hn), std::string(hl), std::string(hver), std::string(bundle))

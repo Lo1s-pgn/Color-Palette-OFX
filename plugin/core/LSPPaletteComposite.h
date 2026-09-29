@@ -67,7 +67,6 @@ bool buildCompositePlan(const OfxRectI& dstBounds,
     const OfxRectI& srcBounds,
     const std::vector<LSPPaletteExtract::Swatch>& palette,
     WorkshopColor::TransferFunctionId transfer,
-    WorkshopColor::ColorPrimariesId primaries,
     const Presentation& pres,
     OverlayLayout& overlayOut,
     CompositeFrame& frameOut);
